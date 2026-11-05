@@ -9,6 +9,16 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   adminCloseDiningSession,
   adminMarkDiningSessionPaid,
   adminMarkOrderItemServed,
@@ -93,26 +103,60 @@ function ItemRow({ item, busyId, onServe }: { item: SessionOrderItem; busyId: st
   );
 }
 
-function OrderCard({ order, busyId, runAction }: { order: SessionOrder; busyId: string | null; runAction(id: string, action: () => Promise<void>): void }) {
+function CloseSessionAction({ session, busyId, runAction, compact = false, testIdSuffix = session.id }: { session: DiningSession; busyId: string | null; runAction(id: string, action: () => Promise<void>): void; compact?: boolean; testIdSuffix?: string }) {
+  const [warningOpen, setWarningOpen] = useState(false);
+  const hasServedOrder = session.orders.some((order) => order.status === "served");
+  const close = () => runAction(session.id, () => adminCloseDiningSession(session.id));
+  return (
+    <>
+      <button type="button" className={`orders-close-action ${compact ? "is-compact" : ""}`} disabled={busyId === session.id || Boolean(session.closedAt)} onClick={hasServedOrder ? () => setWarningOpen(true) : close} data-testid={`button-close-session-${testIdSuffix}`}>
+        {busyId === session.id ? "جارٍ التحديث…" : "إغلاق الجلسة"}
+      </button>
+      <AlertDialog open={warningOpen} onOpenChange={setWarningOpen}>
+        <AlertDialogContent className="orders-warning-dialog" dir="rtl" data-testid={`dialog-close-session-warning-${testIdSuffix}`}>
+          <AlertDialogHeader>
+            <AlertDialogTitle>إغلاق جلسة فيها طلبات قُدّمت؟</AlertDialogTitle>
+            <AlertDialogDescription>هذه الجلسة غير مدفوعة، وفيها طلب واحد أو أكثر تم تقديمه. سيؤدي الإغلاق إلى إنهاء الجلسة دون تسجيل الدفع.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="orders-warning-actions">
+            <AlertDialogCancel data-testid={`button-cancel-close-session-${testIdSuffix}`}>إلغاء</AlertDialogCancel>
+            <AlertDialogAction className="orders-warning-confirm" disabled={busyId === session.id} onClick={(event) => { event.preventDefault(); setWarningOpen(false); close(); }} data-testid={`button-confirm-close-session-${testIdSuffix}`}>{busyId === session.id ? "جارٍ التحديث…" : "إغلاق على أي حال"}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
+function OrderCard({ order, session, busyId, runAction }: { order: SessionOrder; session: DiningSession; busyId: string | null; runAction(id: string, action: () => Promise<void>): void }) {
   const canServe = order.status === "received" && order.items.some((item) => item.status === "pending");
   const itemCount = order.items.reduce((count, item) => count + item.quantity, 0);
   const itemPreview = order.items.slice(0, 2).map((item) => `${item.quantity.toLocaleString("ar-SY")} × ${item.itemName}`).join("، ");
   return (
     <Dialog>
-      <DialogTrigger asChild>
-        <button type="button" className="orders-order-card" data-testid={`card-admin-order-${order.id}`}>
-          <span className="orders-order-card-head">
-            <span className={`orders-order-status ${order.status}`}>{order.status === "served" ? "مكتمل" : order.status === "cancelled" ? "ملغى" : "طلب جديد"}</span>
-            <time dateTime={order.createdAt}>{time(order.createdAt)}</time>
-          </span>
-          <strong className="orders-order-preview">{itemPreview || "لا توجد أصناف"}</strong>
-          <span className="orders-order-card-foot">
-            <span>{itemCount.toLocaleString("ar-SY")} {itemCount === 1 ? "صنف" : "أصناف"}</span>
-            <b>{money(order.total)}</b>
-            <span className="orders-order-open">التفاصيل <ChevronLeft size={15} /></span>
-          </span>
-        </button>
-      </DialogTrigger>
+      <article className="orders-order-card" data-testid={`card-admin-order-${order.id}`}>
+        <div className="orders-order-actions" aria-label={`إجراءات طلب الطاولة ${order.tableNumber}`}>
+          {canServe && <button type="button" className="orders-order-serve" disabled={busyId === order.id} onClick={() => runAction(order.id, () => adminMarkOrderServed(order.id))} data-testid={`button-serve-order-${order.id}`}><CheckCheck size={15} />{busyId === order.id ? "جارٍ…" : "تم التقديم"}</button>}
+          {!session.paidAt && !session.closedAt && <button type="button" className="orders-pay-action orders-card-pay" disabled={busyId === session.id} onClick={() => runAction(session.id, () => adminMarkDiningSessionPaid(session.id))} data-testid={`button-mark-order-paid-${order.id}`}><CreditCard size={14} />{busyId === session.id ? "جارٍ…" : "تسجيل الدفع"}</button>}
+          {!session.closedAt && !session.paidAt && <CloseSessionAction session={session} busyId={busyId} runAction={runAction} compact testIdSuffix={`${session.id}-${order.id}`} />}
+          {session.paidAt && <span className="orders-card-settled"><Check size={13} /> مدفوع</span>}
+        </div>
+        <DialogTrigger asChild>
+          <button type="button" className="orders-order-card-content" data-testid={`button-open-admin-order-${order.id}`} aria-label={`تفاصيل طلب الطاولة ${order.tableNumber}، ${dateTime(order.createdAt)}`}>
+            <span className="orders-order-card-head">
+              <span className={`orders-order-status ${order.status}`}>{order.status === "served" ? "مكتمل" : order.status === "cancelled" ? "ملغى" : "طلب جديد"}</span>
+              <span className="orders-order-table">طاولة {order.tableNumber}</span>
+              <time dateTime={order.createdAt}>{time(order.createdAt)}</time>
+            </span>
+            <strong className="orders-order-preview">{itemPreview || "لا توجد أصناف"}</strong>
+            <span className="orders-order-card-foot">
+              <span>{itemCount.toLocaleString("ar-SY")} {itemCount === 1 ? "صنف" : "أصناف"}</span>
+              <b>{money(order.total)}</b>
+              <span className="orders-order-open">التفاصيل <ChevronLeft size={15} /></span>
+            </span>
+          </button>
+        </DialogTrigger>
+      </article>
       <DialogContent className="orders-detail-dialog" dir="rtl">
         <DialogHeader className="orders-detail-heading">
           <span className={`orders-order-status ${order.status}`}>{order.status === "served" ? "مكتمل" : order.status === "cancelled" ? "ملغى" : "طلب جديد"}</span>
@@ -123,7 +167,10 @@ function OrderCard({ order, busyId, runAction }: { order: SessionOrder; busyId: 
           {order.items.map((item) => <ItemRow key={item.id} item={item} busyId={busyId} onServe={(id) => runAction(id, () => adminMarkOrderItemServed(id))} />)}
         </div>
         <footer className="orders-order-total"><span>مجموع الطلب</span><b>{money(order.total)}</b></footer>
-        {canServe && <button type="button" className="orders-order-serve orders-detail-serve" disabled={busyId === order.id} onClick={() => runAction(order.id, () => adminMarkOrderServed(order.id))} data-testid={`button-serve-order-${order.id}`}><CheckCheck size={16} />{busyId === order.id ? "جارٍ التحديث…" : "تم تقديم الطلب"}</button>}
+        <div className="orders-detail-actions">
+          {canServe && <button type="button" className="orders-order-serve orders-detail-serve" disabled={busyId === order.id} onClick={() => runAction(order.id, () => adminMarkOrderServed(order.id))} data-testid={`button-serve-order-detail-${order.id}`}><CheckCheck size={16} />{busyId === order.id ? "جارٍ التحديث…" : "تم تقديم الطلب"}</button>}
+          {!session.paidAt && !session.closedAt && <button type="button" className="orders-pay-action orders-detail-pay" disabled={busyId === session.id} onClick={() => runAction(session.id, () => adminMarkDiningSessionPaid(session.id))} data-testid={`button-mark-order-paid-detail-${order.id}`}><CreditCard size={15} />{busyId === session.id ? "جارٍ التحديث…" : "تسجيل الدفع وإغلاق الجلسة"}</button>}
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -147,12 +194,12 @@ function SessionCard({ session, now, busyId, runAction }: { session: DiningSessi
         {session.billRequested && <span className="is-request">طلب حساب</span>}
       </div>
       <div className="orders-session-orders">
-        {session.orders.length === 0 ? <p className="orders-no-orders">لا توجد طلبات مسجلة في هذه الجلسة.</p> : session.orders.map((order) => <OrderCard key={order.id} order={order} busyId={busyId} runAction={runAction} />)}
+        {session.orders.length === 0 ? <p className="orders-no-orders">لا توجد طلبات مسجلة في هذه الجلسة.</p> : session.orders.map((order) => <OrderCard key={order.id} order={order} session={session} busyId={busyId} runAction={runAction} />)}
       </div>
-      {(!session.paidAt || !isClosed) && (
+      {session.orders.length === 0 && (!session.paidAt || !isClosed) && (
         <footer className="orders-session-actions">
           {!session.paidAt && <button type="button" className="orders-pay-action" disabled={busyId === session.id} onClick={() => runAction(session.id, () => adminMarkDiningSessionPaid(session.id))} data-testid={`button-mark-session-paid-${session.id}`}><CreditCard size={16} />{busyId === session.id ? "جارٍ التحديث…" : "تسجيل الدفع وإغلاق الجلسة"}</button>}
-          {!isClosed && <button type="button" className="orders-close-action" disabled={busyId === session.id} onClick={() => runAction(session.id, () => adminCloseDiningSession(session.id))} data-testid={`button-close-session-${session.id}`}>إغلاق الجلسة</button>}
+          {!isClosed && !session.paidAt && <CloseSessionAction session={session} busyId={busyId} runAction={runAction} />}
         </footer>
       )}
     </article>
