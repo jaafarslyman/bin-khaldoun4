@@ -1,15 +1,18 @@
-# [Project name]
+# Ibn Khaldoun Café Menu
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Arabic-first café menu and table-ordering app with a Supabase-backed staff area for menu and order management.
 
 ## Run & Operate
 
 - `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/ibn-khaldoun-menu run dev` — run the café menu web app
+- `pnpm --filter @workspace/ibn-khaldoun-menu run typecheck` — check the café menu app
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required env: `DATABASE_URL` — Postgres connection string
+- Café menu env: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` — Supabase public client configuration
 
 ## Stack
 
@@ -30,7 +33,7 @@ _Populate as you build — non-obvious choices a reader couldn't infer from the 
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Guests can browse the Arabic café menu, customize item variants and ingredients, submit table orders, and request service or a bill. Staff can sign in to manage menu items and monitor active table sessions.
 
 ## User preferences
 

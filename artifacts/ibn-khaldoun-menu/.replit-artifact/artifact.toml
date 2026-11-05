@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "بن خلدون — القائمة"
+description = "Arabic-first café menu and staff menu-management app with customer ordering and Supabase-backed configuration."
+version = "1.0.0"
+id = "artifacts/ibn-khaldoun-menu"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18823
+
+[services.development]
+run = "pnpm --filter @workspace/ibn-khaldoun-menu run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/ibn-khaldoun-menu", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/ibn-khaldoun-menu/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18823"
+BASE_PATH = "/"
