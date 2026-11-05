@@ -29,7 +29,9 @@ export default function BillModal({
     if (isOpen) setTip(session?.tipAmount ? String(session.tipAmount) : "");
   }, [isOpen, session?.id, session?.tipAmount]);
   if (!isOpen) return null;
-  const items = session?.orders.flatMap((order) => order.items.filter((item) => item.status !== "cancelled")) ?? [];
+  const items = session?.orders
+    .filter((order) => !order.paidAt)
+    .flatMap((order) => order.items.filter((item) => item.status !== "cancelled")) ?? [];
   const subtotal = items.reduce((sum, item) => sum + item.total, 0);
   const normalizedTip = tip.trim();
   const tipAmount = normalizedTip === "" ? 0 : Number(normalizedTip);

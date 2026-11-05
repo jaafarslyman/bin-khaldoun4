@@ -48,6 +48,7 @@ export default function ActiveSessionPanel({
                 <header className="guest-session-order-head">
                   <span><Clock3 size={14} /> {time(order.createdAt)}</span>
                   <b>{order.status === "served" ? "تم التقديم" : order.status === "cancelled" ? "ملغى" : "قيد التحضير"}</b>
+                  {order.paidAt && <span className="guest-line-state"><Check size={13} /> مدفوع</span>}
                 </header>
                 <div className="guest-session-lines">
                   {order.items.map((item) => (
@@ -59,7 +60,7 @@ export default function ActiveSessionPanel({
                       </div>
                       <div className="guest-session-line-end">
                         <b>{money(item.total)}</b>
-                        {item.status === "served" ? <span className="guest-line-state"><Check size={13} /> قُدّم</span> : item.status === "cancelled" ? <span className="guest-line-state">ملغى</span> : (
+                        {item.status === "served" ? <span className="guest-line-state"><Check size={13} /> قُدّم</span> : item.status === "cancelled" ? <span className="guest-line-state">ملغى</span> : order.paidAt ? <span className="guest-line-state"><Check size={13} /> مدفوع</span> : (
                           <button type="button" className="guest-cancel-link" disabled={busyId === item.id || busyId === order.id} onClick={() => void onCancelItem(item.id)} data-testid={`button-cancel-session-item-${item.id}`}>{busyId === item.id ? "جارٍ الإلغاء…" : "إلغاء الصنف"}</button>
                         )}
                       </div>
@@ -68,11 +69,11 @@ export default function ActiveSessionPanel({
                 </div>
                 <footer className="guest-session-order-foot">
                   <span>مجموع الطلب</span><b>{money(order.total)}</b>
-                  {order.items.length > 0 && order.items.every((item) => item.status === "pending") && <button type="button" className="guest-cancel-order" disabled={busyId === order.id} onClick={() => void onCancelOrder(order.id)} data-testid={`button-cancel-session-order-${order.id}`}>{busyId === order.id ? "جارٍ الإلغاء…" : "إلغاء الطلب بالكامل"}</button>}
+                  {!order.paidAt && order.items.length > 0 && order.items.every((item) => item.status === "pending") && <button type="button" className="guest-cancel-order" disabled={busyId === order.id} onClick={() => void onCancelOrder(order.id)} data-testid={`button-cancel-session-order-${order.id}`}>{busyId === order.id ? "جارٍ الإلغاء…" : "إلغاء الطلب بالكامل"}</button>}
                 </footer>
               </article>
             ))}
-            <div className="guest-session-total"><span>إجمالي الجلسة</span><strong>{money(session.total)}</strong></div>
+            <div className="guest-session-total"><span>المتبقي على الجلسة</span><strong>{money(session.total)}</strong></div>
           </div>
         )}
       </section>

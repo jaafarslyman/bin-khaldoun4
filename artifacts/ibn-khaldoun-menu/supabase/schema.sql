@@ -52,8 +52,12 @@ create table if not exists public.orders (
   status text not null default 'received'
     check (status in ('received', 'preparing', 'ready', 'served', 'cancelled')),
   total bigint not null default 0 check (total >= 0),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  paid_at timestamptz
 );
+
+alter table public.orders
+  add column if not exists paid_at timestamptz;
 
 create table if not exists public.order_items (
   id uuid primary key default gen_random_uuid(),
@@ -844,6 +848,7 @@ begin
   from public.orders as parent
   join public.order_items as item on item.order_id = parent.id
   where parent.session_id = v_session.id
+    and parent.paid_at is null
     and item.status <> 'cancelled';
 
   return jsonb_build_object(
@@ -876,6 +881,7 @@ begin
           'status', parent.status,
           'total', parent.total,
           'created_at', parent.created_at,
+          'paid_at', parent.paid_at,
           'order_items', coalesce((
             select jsonb_agg(
               jsonb_build_object(
@@ -1089,6 +1095,7 @@ begin
   from public.orders as parent
   join public.order_items as item on item.order_id = parent.id
   where parent.session_id = v_session_id
+    and parent.paid_at is null
     and item.status <> 'cancelled';
 
   update public.service_requests
@@ -1126,9 +1133,10 @@ begin
   where session.id = p_session_id
     and session.closed_at is null
     and parent.id = p_order_id
+    and parent.paid_at is null
   for update of session;
   if not found then
-    raise exception 'This table session is no longer open.';
+    raise exception 'This order is paid or its table session is no longer open.';
   end if;
 
   if exists (
@@ -1151,6 +1159,7 @@ begin
   from public.orders as parent
   join public.order_items as item on item.order_id = parent.id
   where parent.session_id = p_session_id
+    and parent.paid_at is null
     and item.status <> 'cancelled';
 
   update public.service_requests
@@ -1189,9 +1198,10 @@ begin
     and session.closed_at is null
     and item.id = p_order_item_id
     and item.status = 'pending'
+    and parent.paid_at is null
   for update of session, item;
   if not found then
-    raise exception 'This item is already served or the table session is closed.';
+    raise exception 'This item is served, paid, or its table session is closed.';
   end if;
 
   update public.order_items
@@ -1224,6 +1234,7 @@ begin
   from public.orders as parent
   join public.order_items as item on item.order_id = parent.id
   where parent.session_id = p_session_id
+    and parent.paid_at is null
     and item.status <> 'cancelled';
 
   update public.service_requests
@@ -1329,6 +1340,7 @@ begin
   from public.orders as parent
   join public.order_items as item on item.order_id = parent.id
   where parent.session_id = p_session_id
+    and parent.paid_at is null
     and item.status <> 'cancelled';
   v_bill_amount := v_food_total + p_tip_amount;
 
@@ -1480,6 +1492,61 @@ begin
 end;
 $$;
 
+create or replace function public.admin_mark_order_paid(
+  p_order_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_session_id uuid;
+  v_bill_amount bigint;
+begin
+  if not public.is_menu_admin() then
+    raise exception 'Admin access is required.';
+  end if;
+
+  select parent.session_id
+  into v_session_id
+  from public.dining_sessions as session
+  join public.orders as parent on parent.session_id = session.id
+  where parent.id = p_order_id
+    and parent.status <> 'cancelled'
+  for update of session, parent;
+  if not found then
+    raise exception 'Order not found or cancelled.';
+  end if;
+
+  update public.orders
+  set paid_at = coalesce(paid_at, now())
+  where id = p_order_id;
+
+  select coalesce(sum(item.line_total), 0) + session.tip_amount
+  into v_bill_amount
+  from public.dining_sessions as session
+  left join public.orders as parent
+    on parent.session_id = session.id and parent.paid_at is null
+  left join public.order_items as item
+    on item.order_id = parent.id and item.status <> 'cancelled'
+  where session.id = v_session_id
+  group by session.tip_amount;
+
+  update public.service_requests
+  set bill_amount = v_bill_amount
+  where session_id = v_session_id
+    and request_type = 'bill'
+    and status = 'pending';
+
+  return jsonb_build_object(
+    'paid', true,
+    'order_id', p_order_id,
+    'session_total', v_bill_amount
+  );
+end;
+$$;
+
 create or replace function public.admin_mark_dining_session_paid(
   p_session_id uuid
 )
@@ -1509,7 +1576,8 @@ begin
     coalesce(sum(item.line_total), 0) + session.tip_amount
   into v_total
   from public.dining_sessions as session
-  left join public.orders as parent on parent.session_id = session.id
+  left join public.orders as parent
+    on parent.session_id = session.id and parent.paid_at is null
   left join public.order_items as item
     on item.order_id = parent.id and item.status <> 'cancelled'
   where session.id = p_session_id
@@ -1520,6 +1588,11 @@ begin
     paid_at = coalesce(paid_at, now()),
     closed_at = coalesce(closed_at, now())
   where id = p_session_id;
+
+  update public.orders
+  set paid_at = coalesce(paid_at, now())
+  where session_id = p_session_id
+    and status <> 'cancelled';
 
   update public.service_requests
   set status = 'resolved', resolved_at = coalesce(resolved_at, now())
@@ -1561,6 +1634,7 @@ revoke all on function public.request_waiter(text, uuid) from public;
 revoke all on function public.request_session_bill(uuid, bigint) from public;
 revoke all on function public.admin_mark_order_item_served(uuid) from public;
 revoke all on function public.admin_mark_order_served(uuid) from public;
+revoke all on function public.admin_mark_order_paid(uuid) from public;
 revoke all on function public.admin_close_dining_session(uuid) from public;
 revoke all on function public.admin_mark_dining_session_paid(uuid) from public;
 revoke all on function public.admin_resolve_service_request(uuid) from public;
@@ -1580,6 +1654,8 @@ grant execute on function public.request_session_bill(uuid, bigint)
 grant execute on function public.admin_mark_order_item_served(uuid)
   to authenticated;
 grant execute on function public.admin_mark_order_served(uuid)
+  to authenticated;
+grant execute on function public.admin_mark_order_paid(uuid)
   to authenticated;
 grant execute on function public.admin_close_dining_session(uuid)
   to authenticated;

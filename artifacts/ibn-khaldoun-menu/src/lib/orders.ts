@@ -25,6 +25,7 @@ export type SessionOrder = {
   status: OrderStatus;
   total: number;
   createdAt: string;
+  paidAt: string | null;
   items: SessionOrderItem[];
 };
 
@@ -117,6 +118,7 @@ function mapOrder(row: RawRecord): SessionOrder {
     status: status === "served" || status === "cancelled" ? status : "received",
     total: asNumber(row.total),
     createdAt: asString(row.created_at),
+    paidAt: asNullableString(row.paid_at),
     items: asArray(row.order_items ?? row.items).map(mapOrderItem),
   };
 }
@@ -124,23 +126,26 @@ function mapOrder(row: RawRecord): SessionOrder {
 function mapSession(row: RawRecord): DiningSession {
   const orders = asArray(row.orders).map(mapOrder);
   const tipAmount = asNumber(row.tip_amount);
+  const paidAt = asNullableString(row.paid_at);
   const calculatedTotal =
     orders.reduce(
       (sessionTotal, order) =>
         sessionTotal +
-        order.items.reduce(
-          (orderTotal, item) =>
-            orderTotal + (item.status === "cancelled" ? 0 : item.total),
-          0,
-        ),
+        (order.paidAt
+          ? 0
+          : order.items.reduce(
+              (orderTotal, item) =>
+                orderTotal + (item.status === "cancelled" ? 0 : item.total),
+              0,
+            )),
       0,
-    ) + tipAmount;
+    ) + (paidAt ? 0 : tipAmount);
   return {
     id: asString(row.id),
     tableNumber: asString(row.table_number),
     openedAt: asString(row.opened_at),
     closedAt: asNullableString(row.closed_at),
-    paidAt: asNullableString(row.paid_at),
+    paidAt,
     tipAmount,
     total: row.total === undefined ? calculatedTotal : asNumber(row.total),
     waiterRequested: row.waiter_requested === true,
@@ -188,7 +193,7 @@ export async function loadAdminOrders(): Promise<AdminOrdersSnapshot> {
     client
       .from("dining_sessions")
       .select(
-        "id, table_number, opened_at, closed_at, paid_at, tip_amount, orders(id, table_number, status, total, created_at, order_items(id, item_name, variant_name, sugar, excluded_ingredients, quantity, unit_price, line_total, status, served_at, cancelled_at))",
+        "id, table_number, opened_at, closed_at, paid_at, tip_amount, orders(id, table_number, status, total, created_at, paid_at, order_items(id, item_name, variant_name, sugar, excluded_ingredients, quantity, unit_price, line_total, status, served_at, cancelled_at))",
       )
       .or(`closed_at.is.null,opened_at.gte.${recentSince}`)
       .order("opened_at", { ascending: false })
@@ -237,6 +242,7 @@ async function callAdminRpc(
   functionName:
     | "admin_mark_order_served"
     | "admin_mark_order_item_served"
+    | "admin_mark_order_paid"
     | "admin_close_dining_session"
     | "admin_mark_dining_session_paid"
     | "admin_resolve_service_request",
@@ -304,6 +310,10 @@ export async function requestBill(
 
 export async function adminMarkOrderServed(orderId: string) {
   await callAdminRpc("admin_mark_order_served", { p_order_id: orderId });
+}
+
+export async function adminMarkOrderPaid(orderId: string) {
+  await callAdminRpc("admin_mark_order_paid", { p_order_id: orderId });
 }
 
 export async function adminMarkOrderItemServed(itemId: string) {
